@@ -1,0 +1,58 @@
+#This is the script used for transcriptome-wide SNP detection for C. fornicata
+#Danielle Jordan
+#Jan 12 2026
+#This was run on the University of Aberdeen HPC
+
+#Go to working directory 
+cd /path/to/file/directory
+
+#Load modules 
+module load hisat2/2.2.1
+module load samtools/1.19.2
+module load bcftools/1.14
+module load tabix/2013-12-16
+
+#Create HISAT2 index from your transcriptome
+hisat2-build Cfornicata_transcriptome.fasta cforn_index
+
+#Map transcripts to the indexed transcriptome using hisat2 
+#Do this for all libraries; recommend using an array
+hisat2 -x cforn_index -1 cforn_lhip_V001_1.fq.gz -2 cforn_lhip_V001_2.fq.gz -S cforn_lhip_V001.sam
+
+#SAM to BAM conversion
+#Do this for all sam files, recommend using an array
+samtools view -bS cforn_lhip_V001.sam > cforn_lhip_V001.bam
+samtools sort -o cforn_lhip_V001.sorted.bam cforn_lhip_V001.bam
+samtools index cforn_lhip_V001.sorted.bam
+
+#Call variants across all libraries
+bcftools mpileup -f  cfornicata_transcriptome.fasta *.sorted.bam -Ou | \
+bcftools call -mv -Ob -o all_variants.bcf
+
+###At this point, all information is within one .bcf file####
+
+#Convert BCF to VCF for easier inspection
+bcftools view all_variants.bcf > all_variants.vcf
+
+#Filter for high-confidence SNPs
+#Filter SNPs with quality >20 and depth >10, output compressed VCF
+bcftools filter -i 'QUAL>20 && DP>10' all_variants.vcf -Oz -o all_variants_filtered.vcf.gz
+
+#Index the filtered VCF
+tabix -p vcf all_variants_filtered.vcf.gz
+
+#Generate summary statistics for the whole transcriptome
+bcftools stats all_variants_filtered.vcf.gz > transcriptome_snp_stats.txt
+
+####This section is for pulling a specific transcript and looking at SNPs####
+
+#Extract transcript-specific SNPs
+bcftools view -r TRANSCRIPT_FASTA_HEADER all_variants_filtered.vcf.gz -Oz -o transcript_7_snps.vcf.gz
+
+#Index transcript 7 SNPs VCF
+tabix -p vcf transcript_7_snps.vcf.gz
+
+#Generate per-individual SNP table for pax6
+bcftools query -f '%CHROM\t%POS\t%ID\t%REF\t%ALT[\t%GT]\n' transcript_7_snps.vcf.gz > transcript_7_snp_table.tsv
+
+####Interpret results as needed from here######
